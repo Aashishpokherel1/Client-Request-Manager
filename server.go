@@ -1,56 +1,111 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-)
+	"os"
 
-// Client struct defines the structure of a client
-type Client struct {
-	ID    int    `json:"id"`
-	Name  string `json:"name"`
-	Email string `json:"email"`
-}
+	"client-request-manager/micro_server" // Import the micro server package
+
+	"github.com/joho/godotenv" // Import the godotenv package
+)
 
 // RootHandler handles requests to the root "/"
 func RootHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Welcome to Client Request Manager!")
+	// Respond with a simple message indicating this is the main server
+	fmt.Fprintf(w, "This is the Main Power Server")
 }
 
-// ClientsHandler handles requests to "/clients"
-func ClientsHandler(w http.ResponseWriter, r *http.Request) {
-	clients := []Client{
-		{ID: 1, Name: "Client A", Email: "clienta@example.com"},
-		{ID: 2, Name: "Client B", Email: "clientb@example.com"},
-	}
+// ForwardRequestToReadServer handles GET requests and forwards them to the Read Server
+func ForwardRequestToReadServer(w http.ResponseWriter, r *http.Request) {
+	// Check the HTTP method type (GET, POST, etc.)
+	switch r.Method {
+	case http.MethodGet:
+		// If the request is a GET method, forward it to the Read Server
+		resp, err := http.Get("http://localhost:8083/get") // Read Server's URL
+		if err != nil {
+			http.Error(w, "Error forwarding request to Read Server", http.StatusInternalServerError)
+			return
+		}
+		defer resp.Body.Close()
 
-	// Set the response header to application/json
-	w.Header().Set("Content-Type", "application/json")
+		// Respond to the client indicating the request was forwarded
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "GET Request forwarded to Read Server. Status: %d", resp.StatusCode)
+		fmt.Fprintf(w, "with url: %d", resp.StatusCode)
 
-	// Send the list of clients as JSON
-	if err := json.NewEncoder(w).Encode(clients); err != nil {
-		http.Error(w, "Error encoding response", http.StatusInternalServerError)
+	case http.MethodPost:
+		// If the request is a POST method, handle it differently
+		// You could add some business logic here if needed
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "POST Request received. No further action taken. no post server")
+
+	case http.MethodPut:
+		// If the request is a POST method, handle it differently
+		// You could add some business logic here if needed
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "Put Request received. No further action taken. no put server")
+	case http.MethodDelete:
+		// If the request is a POST method, handle it differently
+		// You could add some business logic here if needed
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "POST Request received. No further action taken.no delete server")
+
+	default:
+		// For other methods (PUT, DELETE, etc.), send an error
+		http.Error(w, fmt.Sprintf("Method %s not allowed", r.Method), http.StatusMethodNotAllowed)
 	}
 }
 
-// StartServer initializes the routes and starts the HTTP server
-func StartServer() {
-	// Handle requests for root ("/") and "/clients"
-	http.HandleFunc("/", RootHandler)
-	http.HandleFunc("/clients", ClientsHandler)
+// StartMainServer initializes the routes for the main server
+func StartMainServer(done chan bool) {
+	// Handle requests for root ("/") and "/power"
+	http.HandleFunc("/power", ForwardRequestToReadServer)
 
-	// Define the address and port for the server (e.g., :8080)
-	port := ":8080"
-	fmt.Printf("Server started at http://localhost%s\n", port)
+	// Handle GET requests and forward to Read Server
 
-	// Start the server and listen for requests
-	log.Fatal(http.ListenAndServe(port, nil))
+	// Get the port from the environment variable, default to ":8082" if not set
+	port := os.Getenv("MAIN_SERVER_PORT")
+	if port == "" {
+		port = ":8082" // default port
+	}
+
+	fmt.Printf("Main Power Server started at http://localhost%s\n", port)
+
+	// Start the main server and listen for requests
+	go func() {
+		log.Fatal(http.ListenAndServe(port, nil))
+	}()
+
+	// Notify that the main server has started successfully
+	done <- true
 }
 
 // Entry point for the application
 func main() {
-	// Start the server
-	StartServer()
+	// Load environment variables from the .env file
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
+	// Create a channel to synchronize the start of the main server
+	done := make(chan bool)
+
+	// Start the main server in a goroutine
+	go StartMainServer(done)
+
+	// Wait until the main server is up and running
+	<-done
+
+	// Now, after the main server is up, start the micro server
+	go micro_server.StartReadServer()
+
+	// Keep the main thread running to keep both servers alive
+	select {} // Block indefinitely to keep both servers running
 }
